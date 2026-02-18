@@ -1,0 +1,32 @@
+name: Deploy Poker Leaderboard Lambda Function
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+jobs:
+  deploy_lambda:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-2
+      - name: Validate deployment package contents
+        run: |
+          if [ ! -f "./poker-leaderboard/index.py" ]; then
+            echo "Expected Lambda entry file missing: poker-leaderboard/index.py"
+            exit 1
+          fi
+      - name: deploy poker-leaderboard
+        run: |
+          zip -j poker-leaderboard.zip ./poker-leaderboard/*
+          aws lambda update-function-code --function-name simple-html --zip-file fileb://poker-leaderboard.zip
