@@ -335,7 +335,7 @@ def _render_html(players):
 {player_name_options_html}
     </datalist>
     <script>
-        const PASSWORD = "fn$p@$$w0rd";
+        const PASSWORD = "fn$p@$$w0rd"; // todo
         const placeOptions = ["1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "Bubble", "None"];
 
         const addResultsLink = document.getElementById("add-results-link");
