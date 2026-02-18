@@ -75,7 +75,7 @@ The Lambda reads table name from env var:
 The rendered page includes:
 
 - Bottom-right "Add Results" link
-- Password prompt (`fn$p@$$w0rd` hardcoded currently)
+- Password prompt
 - Dialog with one or more result rows:
   - `Place` dropdown (`1st`..`9th`, `Bubble`, `None`)
   - `Player` searchable free-text input (datalist from existing players)
