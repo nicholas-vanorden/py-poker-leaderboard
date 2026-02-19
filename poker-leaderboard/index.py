@@ -70,6 +70,7 @@ def _load_players(table_name):
                 "points": _parse_points(item.get("points", 0)),
                 "results": str(item.get("results", "")),
                 "updated": str(item.get("updated", "")),
+                "series": str(item.get("series", "")).strip(),
             }
         )
 
@@ -97,37 +98,50 @@ def _upsert_results(table_name, submitted_results):
     logger.info("Starting results upsert for %d row(s) into table '%s'.", len(submitted_results), table_name)
     table = boto3.resource("dynamodb").Table(table_name)
     players = _load_players(table_name)
-    player_lookup = {player["name"].casefold(): player for player in players if player["name"].strip()}
+    player_lookup = {
+        (player["name"].casefold(), str(player.get("series", "")).strip().casefold()): player
+        for player in players
+        if player["name"].strip()
+    }
     now_iso = _now_iso()
     processed = 0
-    request_names = set()
+    request_keys = set()
 
     for index, new_result in enumerate(submitted_results, start=1):
         place = str(new_result.get("place", "None")).strip() or "None"
         name = str(new_result.get("name", new_result.get("player", ""))).strip()
+        series = str(new_result.get("series", "")).strip()
         points = _parse_points(new_result.get("points", 0))
-        logger.info("Processing row %d: player='%s', place='%s', points='%s'.", index, name, place, str(points))
+        logger.info(
+            "Processing row %d: player='%s', series='%s', place='%s', points='%s'.",
+            index,
+            name,
+            series,
+            place,
+            str(points),
+        )
 
         if not name:
             raise ValueError("Each result row must include a player name.")
+        if not series:
+            raise ValueError("Each result row must include a series.")
         if points <= 0 or points != points.to_integral_value():
             raise ValueError("Each result row must include whole-number points greater than 0.")
 
-        lookup_name = name.casefold()
-        if lookup_name in request_names:
+        lookup_key = (name.casefold(), series.casefold())
+        if lookup_key in request_keys:
             raise ValueError("A player can only appear once in a single save.")
-        request_names.add(lookup_name)
-
-        lookup_key = lookup_name
+        request_keys.add(lookup_key)
         existing_player = player_lookup.get(lookup_key)
 
         if existing_player:
             next_points = existing_player["points"] + points
             next_results = _normalize_results_text(existing_player.get("results", ""), place)
             logger.info(
-                "Updating existing player id='%s' name='%s' -> points='%s', results='%s'.",
+                "Updating existing player id='%s' name='%s' series='%s' -> points='%s', results='%s'.",
                 existing_player["id"],
                 existing_player["name"],
+                existing_player.get("series", ""),
                 str(next_points),
                 next_results,
             )
@@ -154,14 +168,16 @@ def _upsert_results(table_name, submitted_results):
             new_player = {
                 "id": player_id,
                 "name": name,
+                "series": series,
                 "points": points,
                 "results": initial_results,
                 "updated": now_iso,
             }
             logger.info(
-                "Creating new player id='%s' name='%s' with points='%s' and results='%s'.",
+                "Creating new player id='%s' name='%s' series='%s' with points='%s' and results='%s'.",
                 new_player["id"],
                 new_player["name"],
+                new_player["series"],
                 str(new_player["points"]),
                 new_player["results"],
             )
@@ -229,33 +245,90 @@ def _latest_updated_text(players):
     return f"{latest.month}/{latest.day}/{latest.year}"
 
 
-def _render_rows(players):
-    point_counts = {}
+def _series_latest_updated_text(players):
+    latest_by_series = {}
     for player in players:
-        points = player["points"]
-        point_counts[points] = point_counts.get(points, 0) + 1
+        series = str(player.get("series", "")).strip()
+        if not series:
+            continue
+
+        parsed_updated = _parse_iso_datetime(player.get("updated", ""))
+        current_latest = latest_by_series.get(series)
+        if parsed_updated and (current_latest is None or parsed_updated > current_latest):
+            latest_by_series[series] = parsed_updated
+
+    text_by_series = {}
+    for series, latest in latest_by_series.items():
+        text_by_series[series] = f"{latest.month}/{latest.day}/{latest.year}" if latest else "Unknown"
+    return text_by_series
+
+
+def _series_values_by_latest_updated(players):
+    latest_by_series = {}
+    for player in players:
+        series = str(player.get("series", "")).strip()
+        if not series:
+            continue
+
+        parsed_updated = _parse_iso_datetime(player.get("updated", ""))
+        prior = latest_by_series.get(series)
+        if prior is None or (parsed_updated is not None and (prior is None or parsed_updated > prior)):
+            latest_by_series[series] = parsed_updated
+
+    ordered = sorted(
+        latest_by_series.items(),
+        key=lambda entry: (
+            -(entry[1].timestamp() if entry[1] is not None else float("-inf")),
+            entry[0].lower(),
+            entry[0],
+        ),
+    )
+    return [series for series, _latest in ordered]
+
+
+def _render_rows(players, ordered_series_values):
+    series_to_players = {}
+    for player in players:
+        series = str(player.get("series", "")).strip()
+        series_to_players.setdefault(series, []).append(player)
 
     rows = []
-    display_rank = 0
-    previous_points = None
-    for index, player in enumerate(players, start=1):
-        if previous_points is None or player["points"] != previous_points:
-            display_rank = index
+    ordered_series = list(ordered_series_values)
+    ordered_series_set = set(ordered_series_values)
+    unordered_series = [series for series in series_to_players.keys() if series not in ordered_series_set]
+    ordered_series.extend(sorted(unordered_series, key=lambda value: (value.lower(), value)))
 
-        rank = _rank_label(display_rank, player["points"], point_counts)
-        previous_points = player["points"]
-        rows.append(
-            "\n".join(
-                [
-                    "                <tr>",
-                    f"                    <td>{escape(rank)}</td>",
-                    f"                    <td>{escape(player['name'])}</td>",
-                    f"                    <td>{escape(_format_points(player['points']))}</td>",
-                    f"                    <td>{escape(player['results'])}</td>",
-                    "                </tr>",
-                ]
+    for series in ordered_series:
+        series_players = series_to_players.get(series, [])
+        if not series_players:
+            continue
+
+        series_players.sort(key=lambda player: (-player["points"], player["name"].lower(), player["name"]))
+        point_counts = {}
+        for player in series_players:
+            points = player["points"]
+            point_counts[points] = point_counts.get(points, 0) + 1
+
+        display_rank = 0
+        previous_points = None
+        for index, player in enumerate(series_players, start=1):
+            if previous_points is None or player["points"] != previous_points:
+                display_rank = index
+
+            rank = _rank_label(display_rank, player["points"], point_counts)
+            previous_points = player["points"]
+            rows.append(
+                "\n".join(
+                    [
+                        f"                <tr data-series=\"{escape(player.get('series', ''))}\">",
+                        f"                    <td>{escape(rank)}</td>",
+                        f"                    <td>{escape(player['name'])}</td>",
+                        f"                    <td>{escape(_format_points(player['points']))}</td>",
+                        f"                    <td>{escape(player['results'])}</td>",
+                        "                </tr>",
+                    ]
+                )
             )
-        )
 
     return "\n".join(rows)
 
@@ -270,7 +343,15 @@ def _render_player_name_options(players):
 
 def _render_html(players):
     updated_text = _latest_updated_text(players)
-    rows_html = _render_rows(players)
+    series_values = _series_values_by_latest_updated(players)
+    updated_text_by_series_json = json.dumps(_series_latest_updated_text(players))
+    series_options_html = "\n".join(
+        [f"                    <option value=\"{escape(series)}\">{escape(series)}</option>" for series in series_values]
+    )
+    dialog_series_options_html = "\n".join(
+        [f"                        <option value=\"{escape(series)}\">{escape(series)}</option>" for series in series_values]
+    )
+    rows_html = _render_rows(players, series_values)
     player_name_options_html = _render_player_name_options(players)
 
     return f"""<!DOCTYPE html>
@@ -284,10 +365,15 @@ def _render_html(players):
     <body>
     <div class=\"container\">
         <div>
-            <h1>Fire N Slice - Winter Tournament Series</h1>
+            <h1>Fire N Slice - Poker Tournament Series</h1>
         </div>
-        <div>
-            <p>Updated {escape(updated_text)}</p>
+        <div class="series-updated-row">
+            <div class="series-filter-wrap">
+                <select id="series-filter" name="series-filter" aria-label="Series">
+{series_options_html}
+                </select>
+            </div>
+            <p class="updated-text">Updated {escape(updated_text)}</p>
         </div>
         <table>
             <thead>
@@ -298,7 +384,7 @@ def _render_html(players):
                     <th>Results</th>
                 </tr>
             </thead>
-            <tbody>
+            <tbody id="leaderboard-rows">
 {rows_html}
             </tbody>
         </table>
@@ -309,7 +395,12 @@ def _render_html(players):
     <dialog id=\"add-results-dialog\">
         <article>
             <header>
-                <h3>Add Results</h3>
+                <div class="dialog-header-row">
+                    <h3>Add Results to:</h3>
+                    <select id="dialog-series-select" name="dialog-series-select" aria-label="Series for new results">
+{dialog_series_options_html}
+                    </select>
+                </div>
             </header>
             <table class=\"results-table\">
                 <thead>
@@ -339,11 +430,37 @@ def _render_html(players):
         const placeOptions = ["1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "Bubble", "None"];
 
         const addResultsLink = document.getElementById("add-results-link");
+        const seriesFilter = document.getElementById("series-filter");
+        const dialogSeriesSelect = document.getElementById("dialog-series-select");
+        const leaderboardRows = document.getElementById("leaderboard-rows");
+        const updatedText = document.querySelector(".updated-text");
+        const updatedBySeries = {updated_text_by_series_json};
         const addResultsDialog = document.getElementById("add-results-dialog");
         const addRowButton = document.getElementById("add-row-button");
         const cancelResultsButton = document.getElementById("cancel-results-button");
         const saveResultsButton = document.getElementById("save-results-button");
         const resultsRows = document.getElementById("results-rows");
+
+        function applySeriesFilter() {{
+            if (!seriesFilter || !leaderboardRows) {{
+                return;
+            }}
+            const selectedSeries = seriesFilter.value;
+            const rows = Array.from(leaderboardRows.querySelectorAll("tr"));
+            for (const row of rows) {{
+                const rowSeries = row.getAttribute("data-series") || "";
+                row.style.display = rowSeries === selectedSeries ? "" : "none";
+            }}
+            if (updatedText) {{
+                const nextUpdatedText = updatedBySeries[selectedSeries] || "Unknown";
+                updatedText.textContent = `Updated ${{nextUpdatedText}}`;
+            }}
+        }}
+
+        if (seriesFilter) {{
+            seriesFilter.addEventListener("change", applySeriesFilter);
+            applySeriesFilter();
+        }}
 
         function getNextPlace(currentPlace) {{
             const currentIndex = placeOptions.indexOf(currentPlace);
@@ -454,6 +571,9 @@ def _render_html(players):
             event.preventDefault();
             const passwordInputValue = window.prompt("Enter password:");
             if (passwordInputValue === PASSWORD) {{
+                if (dialogSeriesSelect && seriesFilter) {{
+                    dialogSeriesSelect.value = seriesFilter.value;
+                }}
                 resetRows();
                 addResultsDialog.showModal();
             }} else if (passwordInputValue !== null) {{
@@ -474,6 +594,7 @@ def _render_html(players):
                 const place = row.querySelector(".place-select").value;
                 const playerInput = row.querySelector("input[list='player-name-options']");
                 const pointsInput = row.querySelector(".points-input");
+                const seriesValue = dialogSeriesSelect ? dialogSeriesSelect.value.trim() : "";
                 const player = playerInput.value.trim();
                 const pointsValue = pointsInput.value;
                 const points = Number(pointsValue);
@@ -489,6 +610,13 @@ def _render_html(players):
                     pointsInput.focus();
                     return;
                 }}
+                if (!seriesValue) {{
+                    window.alert("Please select a series.");
+                    if (dialogSeriesSelect) {{
+                        dialogSeriesSelect.focus();
+                    }}
+                    return;
+                }}
 
                 const normalizedPlayer = player.toLowerCase();
                 if (seenPlayers.has(normalizedPlayer)) {{
@@ -501,6 +629,7 @@ def _render_html(players):
                 results.push({{
                     place: place,
                     name: player,
+                    series: seriesValue,
                     points: points
                 }});
             }}
@@ -557,6 +686,34 @@ def _render_html(players):
             justify-content: flex-end;
             margin-top: 1rem;
         }}
+        .series-updated-row {{
+            overflow: auto;
+        }}
+        .series-filter-wrap {{
+            float: left;
+        }}
+        .series-filter-wrap select {{
+            margin-bottom: 0;
+            width: auto;
+            min-width: 14rem;
+        }}
+        .updated-text {{
+            float: right;
+            margin-bottom: 0;
+        }}
+        @media (max-width: 768px) {{
+            .series-updated-row {{
+                overflow: visible;
+            }}
+            .series-filter-wrap {{
+                float: none;
+            }}
+            .updated-text {{
+                float: none;
+                margin-top: 0.5rem;
+                text-align: left;
+            }}
+        }}
         .results-table th,
         .results-table td {{
             vertical-align: middle;
@@ -575,6 +732,21 @@ def _render_html(players):
             justify-content: space-between;
             align-items: center;
             gap: 0.75rem;
+        }}
+        .dialog-header-row {{
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+        }}
+        .dialog-header-row h3 {{
+            margin-bottom: 0;
+            white-space: nowrap;
+        }}
+        .dialog-header-row select {{
+            margin-bottom: 0;
+            width: auto;
+            min-width: 12rem;
         }}
         .dialog-actions-right {{
             display: flex;
