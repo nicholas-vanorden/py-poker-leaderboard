@@ -17,6 +17,7 @@ Returns an HTML page with:
 
 - `h1` tournament header
 - Series dropdown (distinct `series` values ordered by latest `updated` in each series)
+- Optional `?series=<name>` query support to preselect a series on load (case-insensitive match)
 - "Updated <date>" for the currently selected series
 - Leaderboard table filtered by selected series
 - Tie-aware rank display (`T2nd`, etc.) calculated per series
@@ -84,11 +85,14 @@ The rendered page includes:
 - Bottom-right "Add Results" link
 - Password prompt
 - Dialog with one or more result rows:
-  - Header series dropdown ("Add Results to:") defaulting to current page series
+  - Header series controls ("Add Results to:")
+  - Existing series dropdown defaulting to current page series
+  - `New`/`Choose` toggle to switch between existing-series dropdown and a new-series text input
+  - New-series mode validates: non-empty and must not already exist (case-insensitive)
   - `Place` dropdown (`1st`..`9th`, `Bubble`, `None`)
   - `Player` searchable free-text input (datalist from existing players)
   - `Points` integer-only input
-- Save posts to `/results` and reloads page on success
+- Save posts to `/results` and then navigates back showing the series that was just saved/created
 - Mobile behavior: on small screens, "Updated ..." is shown below the series selector and left-aligned
 
 ## AWS Setup

@@ -31,10 +31,15 @@ This repository contains a Python AWS Lambda that serves a poker leaderboard HTM
 ## Frontend Notes
 - HTML is rendered from Python string templates in `index.py`.
 - Leaderboard is client-filtered by a series dropdown populated from distinct table series values, ordered by latest series `updated` desc.
+- Leaderboard supports `?series=<name>` query to preselect a series on load (case-insensitive).
 - Leaderboard rank labels are computed per series.
 - "Updated ..." text reflects the selected series; on small screens it appears below the series dropdown, left-aligned.
 - "Add Results" UI posts to `/results`.
-- Add Results dialog has its own series dropdown that defaults to the series selected in the main view.
+- Add Results dialog has series controls:
+  - existing-series dropdown defaulting to the currently selected main-view series
+  - `New`/`Choose` toggle that switches to a new-series text input
+  - new-series validation requires non-empty value and rejects existing series names case-insensitively
+- After successful save, client navigates back with `?series=<saved series>` so the updated/created series is shown.
 - Points input is restricted to integer-only entry.
 - Client-side password prompt is temporary and not secure auth.
 
@@ -54,4 +59,6 @@ This repository contains a Python AWS Lambda that serves a poker leaderboard HTM
 1. Python syntax check passes for `poker-leaderboard/index.py`.
 2. `POST /results` validates duplicates by `name + series`, requires `series`, and enforces integer points.
 3. Leaderboard rendering ranks by points descending and handles ties per series.
-4. Deployment workflow still targets Lambda `simple-html`.
+4. Add Results dialog validates new series names are non-empty and unique vs existing series (case-insensitive).
+5. After save, UI returns showing the saved series.
+6. Deployment workflow still targets Lambda `simple-html`.
