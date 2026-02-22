@@ -272,7 +272,7 @@ def _series_values_by_latest_updated(players):
 
         parsed_updated = _parse_iso_datetime(player.get("updated", ""))
         prior = latest_by_series.get(series)
-        if prior is None or (parsed_updated is not None and (prior is None or parsed_updated > prior)):
+        if prior is None or (parsed_updated is not None and parsed_updated > prior):
             latest_by_series[series] = parsed_updated
 
     ordered = sorted(
