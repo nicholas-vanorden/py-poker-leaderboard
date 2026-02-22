@@ -344,6 +344,7 @@ def _render_player_name_options(players):
 def _render_html(players):
     updated_text = _latest_updated_text(players)
     series_values = _series_values_by_latest_updated(players)
+    series_values_json = json.dumps(series_values)
     updated_text_by_series_json = json.dumps(_series_latest_updated_text(players))
     series_options_html = "\n".join(
         [f"                    <option value=\"{escape(series)}\">{escape(series)}</option>" for series in series_values]
@@ -397,9 +398,20 @@ def _render_html(players):
             <header>
                 <div class="dialog-header-row">
                     <h3>Add Results to:</h3>
-                    <select id="dialog-series-select" name="dialog-series-select" aria-label="Series for new results">
+                    <div class="dialog-series-controls">
+                        <select id="dialog-series-select" name="dialog-series-select" aria-label="Series for new results">
 {dialog_series_options_html}
-                    </select>
+                        </select>
+                        <input
+                            type="text"
+                            id="new-series-input"
+                            name="new-series-input"
+                            placeholder="New series name"
+                            aria-label="New series name"
+                            hidden
+                        />
+                        <button type="button" id="new-series-button" class="secondary">New</button>
+                    </div>
                 </div>
             </header>
             <table class=\"results-table\">
@@ -432,14 +444,36 @@ def _render_html(players):
         const addResultsLink = document.getElementById("add-results-link");
         const seriesFilter = document.getElementById("series-filter");
         const dialogSeriesSelect = document.getElementById("dialog-series-select");
+        const newSeriesInput = document.getElementById("new-series-input");
+        const newSeriesButton = document.getElementById("new-series-button");
         const leaderboardRows = document.getElementById("leaderboard-rows");
         const updatedText = document.querySelector(".updated-text");
+        const seriesNames = {series_values_json};
         const updatedBySeries = {updated_text_by_series_json};
         const addResultsDialog = document.getElementById("add-results-dialog");
         const addRowButton = document.getElementById("add-row-button");
         const cancelResultsButton = document.getElementById("cancel-results-button");
         const saveResultsButton = document.getElementById("save-results-button");
         const resultsRows = document.getElementById("results-rows");
+        let isNewSeriesMode = false;
+
+        function setDialogSeriesMode(useNewSeries) {{
+            isNewSeriesMode = useNewSeries;
+            if (dialogSeriesSelect) {{
+                dialogSeriesSelect.hidden = useNewSeries;
+            }}
+            if (newSeriesInput) {{
+                newSeriesInput.hidden = !useNewSeries;
+                if (useNewSeries) {{
+                    newSeriesInput.focus();
+                }} else {{
+                    newSeriesInput.value = "";
+                }}
+            }}
+            if (newSeriesButton) {{
+                newSeriesButton.textContent = useNewSeries ? "Choose" : "New";
+            }}
+        }}
 
         function applySeriesFilter() {{
             if (!seriesFilter || !leaderboardRows) {{
@@ -458,8 +492,22 @@ def _render_html(players):
         }}
 
         if (seriesFilter) {{
+            const params = new URLSearchParams(window.location.search);
+            const requestedSeries = (params.get("series") || "").trim();
+            if (requestedSeries) {{
+                const match = Array.from(seriesFilter.options).find((option) => option.value.toLowerCase() === requestedSeries.toLowerCase());
+                if (match) {{
+                    seriesFilter.value = match.value;
+                }}
+            }}
             seriesFilter.addEventListener("change", applySeriesFilter);
             applySeriesFilter();
+        }}
+
+        if (newSeriesButton) {{
+            newSeriesButton.addEventListener("click", () => {{
+                setDialogSeriesMode(!isNewSeriesMode);
+            }});
         }}
 
         function getNextPlace(currentPlace) {{
@@ -571,6 +619,7 @@ def _render_html(players):
             event.preventDefault();
             const passwordInputValue = window.prompt("Enter password:");
             if (passwordInputValue === PASSWORD) {{
+                setDialogSeriesMode(false);
                 if (dialogSeriesSelect && seriesFilter) {{
                     dialogSeriesSelect.value = seriesFilter.value;
                 }}
@@ -589,12 +638,15 @@ def _render_html(players):
             const rows = Array.from(resultsRows.querySelectorAll("tr"));
             const results = [];
             const seenPlayers = new Set();
+            let savedSeriesValue = "";
 
             for (const row of rows) {{
                 const place = row.querySelector(".place-select").value;
                 const playerInput = row.querySelector("input[list='player-name-options']");
                 const pointsInput = row.querySelector(".points-input");
-                const seriesValue = dialogSeriesSelect ? dialogSeriesSelect.value.trim() : "";
+                const seriesValue = isNewSeriesMode
+                    ? (newSeriesInput ? newSeriesInput.value.trim() : "")
+                    : (dialogSeriesSelect ? dialogSeriesSelect.value.trim() : "");
                 const player = playerInput.value.trim();
                 const pointsValue = pointsInput.value;
                 const points = Number(pointsValue);
@@ -611,12 +663,26 @@ def _render_html(players):
                     return;
                 }}
                 if (!seriesValue) {{
-                    window.alert("Please select a series.");
-                    if (dialogSeriesSelect) {{
+                    window.alert("Please enter a series name.");
+                    if (isNewSeriesMode && newSeriesInput) {{
+                        newSeriesInput.focus();
+                    }} else if (dialogSeriesSelect) {{
                         dialogSeriesSelect.focus();
                     }}
                     return;
                 }}
+                if (isNewSeriesMode) {{
+                    const normalizedNewSeries = seriesValue.toLowerCase();
+                    const existingSeriesMatch = seriesNames.some((value) => value.toLowerCase() === normalizedNewSeries);
+                    if (existingSeriesMatch) {{
+                        window.alert("Series already exists. Choose it from the list instead.");
+                        if (newSeriesInput) {{
+                            newSeriesInput.focus();
+                        }}
+                        return;
+                    }}
+                }}
+                savedSeriesValue = seriesValue;
 
                 const normalizedPlayer = player.toLowerCase();
                 if (seenPlayers.has(normalizedPlayer)) {{
@@ -663,7 +729,11 @@ def _render_html(players):
                 console.log("Results saved:");
                 console.log(results);
                 addResultsDialog.close();
-                window.location.reload();
+                const nextUrl = new URL(window.location.href);
+                if (savedSeriesValue) {{
+                    nextUrl.searchParams.set("series", savedSeriesValue);
+                }}
+                window.location.assign(nextUrl.toString());
             }} catch (_error) {{
                 window.alert("Failed to save results.");
             }} finally {{
@@ -747,6 +817,19 @@ def _render_html(players):
             margin-bottom: 0;
             width: auto;
             min-width: 12rem;
+        }}
+        .dialog-series-controls {{
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }}
+        .dialog-series-controls input {{
+            margin-bottom: 0;
+            width: 12rem;
+        }}
+        .dialog-series-controls button {{
+            margin-bottom: 0;
+            white-space: nowrap;
         }}
         .dialog-actions-right {{
             display: flex;
