@@ -344,8 +344,8 @@ def _render_player_name_options(players):
 def _render_html(players):
     updated_text = _latest_updated_text(players)
     series_values = _series_values_by_latest_updated(players)
-    series_values_json = json.dumps(series_values)
-    updated_text_by_series_json = json.dumps(_series_latest_updated_text(players))
+    series_values_json = json.dumps(series_values).replace("</", "<\\/")
+    updated_text_by_series_json = json.dumps(_series_latest_updated_text(players)).replace("</", "<\\/")
     series_options_html = "\n".join(
         [f"                    <option value=\"{escape(series)}\">{escape(series)}</option>" for series in series_values]
     )
