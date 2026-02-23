@@ -4,7 +4,7 @@ Serverless poker leaderboard built with AWS Lambda, DynamoDB, and Python
 
 A single AWS Lambda function that:
 
-- Serves an HTML leaderboard page for a poker tournament series.
+- Serves an HTML leaderboard page for multiple poker tournament series.
 - Loads player standings from DynamoDB.
 - Provides a password-gated "Add Results" dialog in the UI.
 - Accepts `POST /results` to persist new result rows back to DynamoDB.
@@ -16,9 +16,11 @@ A single AWS Lambda function that:
 Returns an HTML page with:
 
 - `h1` tournament header
-- "Updated <date>" using the newest `updated` value from DynamoDB
-- Leaderboard table sorted by points descending
-- Tie-aware rank display (`T2nd`, etc.)
+- Series dropdown (distinct `series` values ordered by latest `updated` in each series)
+- Optional `?series=<name>` query support to preselect a series on load (case-insensitive match)
+- "Updated <date>" for the currently selected series
+- Leaderboard table filtered by selected series
+- Tie-aware rank display (`T2nd`, etc.) calculated per series
 
 ### `POST /results`
 
@@ -28,15 +30,16 @@ Example payload:
 
 ```json
 [
-  { "place": "1st", "name": "Alice", "points": 10 },
-  { "place": "2nd", "name": "Bob", "points": 7 }
+  { "place": "1st", "name": "Alice", "series": "Winter 2026", "points": 10 },
+  { "place": "2nd", "name": "Bob", "series": "Winter 2026", "points": 7 }
 ]
 ```
 
 Rules:
 
-- Player matching is case-insensitive by `name`.
-- A player can appear only once per save payload.
+- Player matching is case-insensitive by `name` and `series`.
+- A player can appear only once per save payload per `name + series`.
+- `series` is required on each result row.
 - `points` must be a whole number greater than 0.
 
 If player exists:
@@ -49,6 +52,7 @@ If player does not exist:
 
 - `id = uuid4 string`
 - `name = submitted name`
+- `series = submitted series`
 - `points = submitted points`
 - `results = place != "None" ? place : ""`
 - `updated = now (ISO 8601)`
@@ -61,6 +65,7 @@ Attributes used:
 
 - `id` (String) - partition key
 - `name` (String)
+- `series` (String)
 - `points` (Number)
 - `results` (String)
 - `updated` (String, ISO 8601)
@@ -74,13 +79,21 @@ The Lambda reads table name from env var:
 
 The rendered page includes:
 
+- Series selector above the table
+- Initial load defaults to the first (most recently updated) series
+- "Updated ..." changes when series selection changes
 - Bottom-right "Add Results" link
 - Password prompt
 - Dialog with one or more result rows:
+  - Header series controls ("Add Results to:")
+  - Existing series dropdown defaulting to current page series
+  - `New`/`Choose` toggle to switch between existing-series dropdown and a new-series text input
+  - New-series mode validates: non-empty and must not already exist (case-insensitive)
   - `Place` dropdown (`1st`..`9th`, `Bubble`, `None`)
   - `Player` searchable free-text input (datalist from existing players)
   - `Points` integer-only input
-- Save posts to `/results` and reloads page on success
+- Save posts to `/results` and then navigates back showing the series that was just saved/created
+- Mobile behavior: on small screens, "Updated ..." is shown below the series selector and left-aligned
 
 ## AWS Setup
 
