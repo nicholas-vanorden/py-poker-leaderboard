@@ -341,16 +341,50 @@ def _render_player_name_options(players):
     return "\n".join([f"        <option value=\"{escape(name)}\"></option>" for name in names])
 
 
+def _export_rows(players):
+    ordered = sorted(
+        players,
+        key=lambda player: (
+            str(player.get("series", "")).lower(),
+            str(player.get("series", "")),
+            -player["points"],
+            player["name"].lower(),
+            player["name"],
+        ),
+    )
+    return [
+        {
+            "name": player["name"],
+            "series": str(player.get("series", "")),
+            "points": _format_points(player["points"]),
+            "results": player["results"],
+            "updated": player["updated"],
+        }
+        for player in ordered
+    ]
+
+
 def _render_html(players):
     updated_text = _latest_updated_text(players)
     series_values = _series_values_by_latest_updated(players)
     series_values_json = json.dumps(series_values).replace("</", "<\\/")
     updated_text_by_series_json = json.dumps(_series_latest_updated_text(players)).replace("</", "<\\/")
+    export_rows_json = json.dumps(_export_rows(players)).replace("</", "<\\/")
     series_options_html = "\n".join(
         [f"                    <option value=\"{escape(series)}\">{escape(series)}</option>" for series in series_values]
     )
     dialog_series_options_html = "\n".join(
         [f"                        <option value=\"{escape(series)}\">{escape(series)}</option>" for series in series_values]
+    )
+    export_series_checkboxes_html = "\n".join(
+        [
+            (
+                "                    <label class=\"export-series-option\">"
+                f"<input type=\"checkbox\" name=\"export-series\" value=\"{escape(series)}\" checked> {escape(series)}"
+                "</label>"
+            )
+            for series in series_values
+        ]
     )
     rows_html = _render_rows(players, series_values)
     player_name_options_html = _render_player_name_options(players)
@@ -390,6 +424,7 @@ def _render_html(players):
             </tbody>
         </table>
         <div class=\"bottom-actions\">
+            <a href="#" id="export-link">Export</a>
             <a href=\"#\" id=\"add-results-link\">Add Results</a>
         </div>
     </div>
@@ -434,6 +469,28 @@ def _render_html(players):
             </footer>
         </article>
     </dialog>
+    <dialog id="export-dialog">
+        <article>
+            <header>
+                <h3>Export Results</h3>
+            </header>
+            <div class="export-dialog-body">
+                <fieldset>
+                    <legend>Format</legend>
+                    <label><input type="radio" name="export-format" value="csv" checked> CSV</label>
+                    <label><input type="radio" name="export-format" value="json"> JSON</label>
+                </fieldset>
+                <fieldset>
+                    <legend>Series</legend>
+{export_series_checkboxes_html}
+                </fieldset>
+            </div>
+            <footer class="dialog-actions">
+                <button type="button" id="cancel-export-button" class="secondary">Cancel</button>
+                <button type="button" id="confirm-export-button">Export</button>
+            </footer>
+        </article>
+    </dialog>
     <datalist id=\"player-name-options\">
 {player_name_options_html}
     </datalist>
@@ -442,6 +499,7 @@ def _render_html(players):
         const placeOptions = ["1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "Bubble", "None"];
 
         const addResultsLink = document.getElementById("add-results-link");
+        const exportLink = document.getElementById("export-link");
         const seriesFilter = document.getElementById("series-filter");
         const dialogSeriesSelect = document.getElementById("dialog-series-select");
         const newSeriesInput = document.getElementById("new-series-input");
@@ -450,10 +508,14 @@ def _render_html(players):
         const updatedText = document.querySelector(".updated-text");
         const seriesNames = {series_values_json};
         const updatedBySeries = {updated_text_by_series_json};
+        const exportRows = {export_rows_json};
         const addResultsDialog = document.getElementById("add-results-dialog");
+        const exportDialog = document.getElementById("export-dialog");
         const addRowButton = document.getElementById("add-row-button");
         const cancelResultsButton = document.getElementById("cancel-results-button");
         const saveResultsButton = document.getElementById("save-results-button");
+        const cancelExportButton = document.getElementById("cancel-export-button");
+        const confirmExportButton = document.getElementById("confirm-export-button");
         const resultsRows = document.getElementById("results-rows");
         let isNewSeriesMode = false;
 
@@ -507,6 +569,81 @@ def _render_html(players):
         if (newSeriesButton) {{
             newSeriesButton.addEventListener("click", () => {{
                 setDialogSeriesMode(!isNewSeriesMode);
+            }});
+        }}
+
+        function getSelectedExportSeries() {{
+            if (!exportDialog) {{
+                return [];
+            }}
+            const checked = Array.from(exportDialog.querySelectorAll("input[name='export-series']:checked"));
+            return checked.map((input) => input.value);
+        }}
+
+        function getSelectedExportFormat() {{
+            if (!exportDialog) {{
+                return "csv";
+            }}
+            const selected = exportDialog.querySelector("input[name='export-format']:checked");
+            return selected ? selected.value : "csv";
+        }}
+
+        function toCsvValue(value) {{
+            const text = String(value ?? "");
+            return `"${{text.replace(/"/g, '""')}}"`;
+        }}
+
+        function buildCsv(rows) {{
+            const headers = ["series", "name", "points", "results", "updated"];
+            const lines = [headers.join(",")];
+            for (const row of rows) {{
+                lines.push(headers.map((key) => toCsvValue(row[key])).join(","));
+            }}
+            return lines.join("\\n");
+        }}
+
+        function downloadExportFile(fileName, content, mimeType) {{
+            const blob = new Blob([content], {{ type: mimeType }});
+            const url = window.URL.createObjectURL(blob);
+            const anchor = document.createElement("a");
+            anchor.href = url;
+            anchor.download = fileName;
+            document.body.appendChild(anchor);
+            anchor.click();
+            anchor.remove();
+            window.URL.revokeObjectURL(url);
+        }}
+
+        if (exportLink && exportDialog) {{
+            exportLink.addEventListener("click", (event) => {{
+                event.preventDefault();
+                exportDialog.showModal();
+            }});
+        }}
+
+        if (cancelExportButton && exportDialog) {{
+            cancelExportButton.addEventListener("click", () => {{
+                exportDialog.close();
+            }});
+        }}
+
+        if (confirmExportButton && exportDialog) {{
+            confirmExportButton.addEventListener("click", () => {{
+                const selectedSeries = new Set(getSelectedExportSeries());
+                if (selectedSeries.size === 0) {{
+                    window.alert("Select at least one series to export.");
+                    return;
+                }}
+
+                const filteredRows = exportRows.filter((row) => selectedSeries.has(row.series));
+                const format = getSelectedExportFormat();
+                const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+                if (format === "json") {{
+                    downloadExportFile(`poker-results-${{timestamp}}.json`, JSON.stringify(filteredRows, null, 2), "application/json");
+                }} else {{
+                    downloadExportFile(`poker-results-${{timestamp}}.csv`, buildCsv(filteredRows), "text/csv;charset=utf-8");
+                }}
+                exportDialog.close();
             }});
         }}
 
@@ -753,7 +890,8 @@ def _render_html(players):
         }}
         .bottom-actions {{
             display: flex;
-            justify-content: flex-end;
+            justify-content: space-between;
+            align-items: center;
             margin-top: 1rem;
         }}
         .series-updated-row {{
@@ -834,6 +972,13 @@ def _render_html(players):
         .dialog-actions-right {{
             display: flex;
             gap: 0.75rem;
+        }}
+        .export-dialog-body fieldset {{
+            margin-bottom: 1rem;
+        }}
+        .export-series-option {{
+            display: block;
+            margin-bottom: 0.35rem;
         }}
     </style>
 </html>"""

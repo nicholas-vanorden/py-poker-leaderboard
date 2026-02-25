@@ -7,6 +7,7 @@ A single AWS Lambda function that:
 - Serves an HTML leaderboard page for multiple poker tournament series.
 - Loads player standings from DynamoDB.
 - Provides a password-gated "Add Results" dialog in the UI.
+- Provides an export dialog for downloading leaderboard data.
 - Accepts `POST /results` to persist new result rows back to DynamoDB.
 
 ## What It Does
@@ -21,6 +22,7 @@ Returns an HTML page with:
 - "Updated <date>" for the currently selected series
 - Leaderboard table filtered by selected series
 - Tie-aware rank display (`T2nd`, etc.) calculated per series
+- Export link opening an export dialog (CSV/JSON + series selection)
 
 ### `POST /results`
 
@@ -83,6 +85,7 @@ The rendered page includes:
 - Initial load defaults to the first (most recently updated) series
 - "Updated ..." changes when series selection changes
 - Bottom-right "Add Results" link
+- Bottom-left "Export" link
 - Password prompt
 - Dialog with one or more result rows:
   - Header series controls ("Add Results to:")
@@ -94,6 +97,15 @@ The rendered page includes:
   - `Points` integer-only input
 - Save posts to `/results` and then navigates back showing the series that was just saved/created
 - Mobile behavior: on small screens, "Updated ..." is shown below the series selector and left-aligned
+
+Export dialog behavior:
+
+- Formats: `CSV`, `JSON`
+- Series selection: checkbox list (one per series), user may select one, many, or all
+- `Cancel` closes dialog with no action
+- `Export` downloads file to user device and closes dialog
+- Export sort order: `series`, then `points` descending, then `name`
+- Export columns: all except `id` (`series`, `name`, `points`, `results`, `updated`)
 
 ## AWS Setup
 
