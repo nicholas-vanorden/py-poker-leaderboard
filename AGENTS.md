@@ -40,6 +40,12 @@ This repository contains a Python AWS Lambda that serves a poker leaderboard HTM
   - `New`/`Choose` toggle that switches to a new-series text input
   - new-series validation requires non-empty value and rejects existing series names case-insensitively
 - After successful save, client navigates back with `?series=<saved series>` so the updated/created series is shown.
+- "Export" link opens export dialog with:
+  - format radio options (`CSV`, `JSON`)
+  - series checkboxes (one per series; one to many/all selectable)
+  - `Cancel` closes dialog
+  - `Export` downloads and closes dialog
+- Export output excludes `id` and is sorted by `series`, then `points` descending, then `name`.
 - Points input is restricted to integer-only entry.
 - Client-side password prompt is temporary and not secure auth.
 
@@ -61,4 +67,6 @@ This repository contains a Python AWS Lambda that serves a poker leaderboard HTM
 3. Leaderboard rendering ranks by points descending and handles ties per series.
 4. Add Results dialog validates new series names are non-empty and unique vs existing series (case-insensitive).
 5. After save, UI returns showing the saved series.
-6. Deployment workflow still targets Lambda `simple-html`.
+6. Export dialog supports CSV/JSON and series multi-select, with cancel/export button behavior intact.
+7. Export rows are ordered by series, points desc, name and include all non-`id` columns.
+8. Deployment workflow still targets Lambda `simple-html`.
