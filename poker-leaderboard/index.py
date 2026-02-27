@@ -590,7 +590,7 @@ def _render_html(players):
 
         function toCsvValue(value) {{
             const text = String(value ?? "");
-            const sanitized = /^[=+\-@\t\r]/.test(text) ? `'${{text}}` : text;
+            const sanitized = /^[=+\\-@\\t\\r]/.test(text) ? `'${{text}}` : text;
             return `"${{sanitized.replace(/"/g, '""')}}"`;
         }}
 
